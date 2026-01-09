@@ -165,7 +165,7 @@ jobs:
             # Create TOC file if it doesn't exist
             if [[ ! -f "$toc_path" ]]; then
               echo "Creating new TOC file at $toc_path"
-              cat > "$toc_path" << 'EOF'
+              cat > "$toc_path" <<EOF
 # $folder_name
 
 **Description:**
