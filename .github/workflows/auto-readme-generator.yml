@@ -1,53 +1,36 @@
 name: Auto README Generator
 
-# Triggers on any push to any branch, and allows manual execution
 on:
   push:
-    branches: ['**']
+    branches:
+      - '**'
   workflow_dispatch:
 
-# Required permission to commit changes back to the repository
-permissions:
-  contents: write
-
-# Configuration variables - modify these to customize behavior
-env:
-  EXCLUDED_FOLDERS: '.git,.github,node_modules'
-  EXCLUDED_PATTERNS: '.gitignore,.DS_Store'
-
 jobs:
-  update-readmes:
+  generate-readme:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       
       - name: Generate README files
+        shell: bash
         run: |
-          #!/bin/bash
           set -e
           
           # Configuration
-          REPO_OWNER="${{ github.repository_owner }}"
-          REPO_NAME="${{ github.event.repository.name }}"
-          BRANCH="${{ github.ref_name }}"
-          EXCLUDED_FOLDERS="${{ env.EXCLUDED_FOLDERS }}"
-          EXCLUDED_PATTERNS="${{ env.EXCLUDED_PATTERNS }}"
-          
-          # Convert comma-separated lists to arrays
-          IFS=',' read -ra EXCLUDE_DIRS <<< "$EXCLUDED_FOLDERS"
-          IFS=',' read -ra EXCLUDE_FILES <<< "$EXCLUDED_PATTERNS"
+          EXCLUDED_FOLDERS=".git,.github,node_modules"
+          EXCLUDED_PATTERNS=".gitignore,.DS_Store"
           
           # Function to check if folder should be excluded
           should_exclude_folder() {
             local folder="$1"
-            local base_folder=$(basename "$folder")
-            
-            for exclude in "${EXCLUDE_DIRS[@]}"; do
-              if [[ "$base_folder" == "$exclude" || "$folder" == *"/$exclude" || "$folder" == "$exclude" ]]; then
+            IFS=',' read -ra EXCLUDED <<< "$EXCLUDED_FOLDERS"
+            for exclude in "${EXCLUDED[@]}"; do
+              if [[ "$folder" == "$exclude"* ]] || [[ "$folder" == *"/$exclude"* ]]; then
                 return 0
               fi
             done
@@ -58,14 +41,9 @@ jobs:
           should_exclude_file() {
             local file="$1"
             local filename=$(basename "$file")
-            
-            # Exclude hidden files (dotfiles)
-            if [[ "$filename" == .* ]]; then
-              return 0
-            fi
-            
-            for exclude in "${EXCLUDE_FILES[@]}"; do
-              if [[ "$filename" == "$exclude" ]]; then
+            IFS=',' read -ra PATTERNS <<< "$EXCLUDED_PATTERNS"
+            for pattern in "${PATTERNS[@]}"; do
+              if [[ "$filename" == $pattern ]]; then
                 return 0
               fi
             done
@@ -74,63 +52,48 @@ jobs:
           
           # Function to format file size
           format_size() {
-            local size=$1
-            if (( size < 1024 )); then
-              echo "${size}B"
-            elif (( size < 1048576 )); then
-              echo "$(awk "BEGIN {printf \"%.1f\", $size/1024}")KB"
+            local bytes=$1
+            if (( bytes < 1024 )); then
+              echo "${bytes}B"
+            elif (( bytes < 1048576 )); then
+              echo "$(( bytes / 1024 ))KB"
             else
-              echo "$(awk "BEGIN {printf \"%.1f\", $size/1048576}")MB"
+              echo "$(( bytes / 1048576 ))MB"
             fi
           }
           
-          # Function to extract description from README
+          # Function to extract description from TOC file
           extract_description() {
-            local readme_file="$1"
-            
-            if [[ ! -f "$readme_file" ]]; then
-              echo ""
-              return
+            local toc_file="$1"
+            if [[ -f "$toc_file" ]]; then
+              # Extract text after "**Description:**" on the same line or next line
+              local desc=$(sed -n 's/\*\*Description:\*\*[[:space:]]*//p' "$toc_file" | head -1)
+              if [[ -z "$desc" ]]; then
+                # Try to get description from next line after "**Description:**"
+                desc=$(sed -n '/\*\*Description:\*\*/{ n; p; }' "$toc_file" | head -1 | sed 's/^[[:space:]]*//')
+              fi
+              # Clean up empty brackets or placeholder text
+              desc=$(echo "$desc" | sed 's/\[Add description here\]//; s/^[[:space:]]*$//; s/^[[:space:]]*//; s/[[:space:]]*$//')
+              echo "$desc"
             fi
-            
-            # Extract text between **Description:** and --- or markers
-            local in_desc=false
-            local description=""
-            
-            while IFS= read -r line; do
-              if [[ "$line" =~ ^\*\*Description:\*\* ]]; then
-                in_desc=true
-                continue
-              fi
-              
-              if [[ "$in_desc" == true ]]; then
-                if [[ "$line" =~ ^--- || "$line" =~ ^\<\!-- ]]; then
-                  break
-                fi
-                if [[ -n "$line" ]]; then
-                  description="$line"
-                  break
-                fi
-              fi
-            done < "$readme_file"
-            
-            echo "$description"
           }
           
-          # Function to get file extension display name
+          # Function to get display name for file extension
           get_extension_name() {
             local ext="$1"
             case "$ext" in
-              svg) echo "SVG Files" ;;
               md) echo "Markdown Files" ;;
+              svg) echo "SVG Files" ;;
               png) echo "PNG Files" ;;
               jpg|jpeg) echo "JPEG Files" ;;
               gif) echo "GIF Files" ;;
+              txt) echo "Text Files" ;;
               json) echo "JSON Files" ;;
               yml|yaml) echo "YAML Files" ;;
-              txt) echo "Text Files" ;;
+              xml) echo "XML Files" ;;
               pdf) echo "PDF Files" ;;
-              *) echo "$(echo $ext | tr '[:lower:]' '[:upper:]') Files" ;;
+              no-extension) echo "Files (no extension)" ;;
+              *) echo "${ext^^} Files" ;;
             esac
           }
           
@@ -138,14 +101,21 @@ jobs:
           get_file_emoji() {
             local ext="$1"
             case "$ext" in
-              svg|png|jpg|jpeg|gif) echo "🎨" ;;
-              md) echo "📄" ;;
-              json|yml|yaml) echo "⚙️" ;;
-              txt) echo "📝" ;;
+              md) echo "📝" ;;
+              svg) echo "🎨" ;;
+              png|jpg|jpeg|gif) echo "🖼️" ;;
+              txt) echo "📄" ;;
+              json|yml|yaml|xml) echo "⚙️" ;;
               pdf) echo "📕" ;;
-              *) echo "📎" ;;
+              no-extension) echo "📎" ;;
+              *) echo "📄" ;;
             esac
           }
+          
+          # Get repository info
+          REPO_OWNER="${GITHUB_REPOSITORY%/*}"
+          REPO_NAME="${GITHUB_REPOSITORY#*/}"
+          BRANCH="${GITHUB_REF#refs/heads/}"
           
           # Function to process a single folder
           process_folder() {
@@ -158,29 +128,21 @@ jobs:
               folder_name="$(basename "$folder")"
             fi
             
-            local toc_path="$folder/${folder_name}-TOC.md"
+            local toc_filename="${folder_name}-TOC.md"
+            local toc_path="$folder/$toc_filename"
+            
+            # For root folder, place TOC file in root
+            if [[ "$folder" == "." ]]; then
+              toc_path="$toc_filename"
+            fi
             
             echo "Processing folder: $folder"
             
-            # Create TOC file if it doesn't exist
+            # If TOC file doesn't exist, create it with template
             if [[ ! -f "$toc_path" ]]; then
-              echo "Creating new TOC file at $toc_path"
-              {
-                echo "# $folder_name"
-                echo ""
-                echo "**Description:**"
-                echo ""
-                echo "---"
-                echo ""
-                echo "<!-- Auto-generated content below. Do not edit between markers. -->"
-                echo "<!-- BEGIN AUTO-GENERATED CONTENT -->"
-                echo "<!-- END AUTO-GENERATED CONTENT -->"
-              } > "$toc_path"
-            fi
-            
-            # Check if markers exist, if not add them
-            if ! grep -q "<!-- BEGIN AUTO-GENERATED CONTENT -->" "$toc_path"; then
-              echo "Adding markers to $toc_path"
+              echo "# $folder_name" > "$toc_path"
+              echo "" >> "$toc_path"
+              echo "**Description:** [Add description here]" >> "$toc_path"
               echo "" >> "$toc_path"
               echo "---" >> "$toc_path"
               echo "" >> "$toc_path"
@@ -190,10 +152,14 @@ jobs:
             fi
             
             # Extract manual content before marker and generate new file
+            echo "DEBUG: Starting TOC generation for $toc_path" >&2
             {
+              echo "DEBUG: Extracting header" >&2
               # Extract header content (everything up to and including the BEGIN marker)
-              sed -n '1,/<!-- BEGIN AUTO-GENERATED CONTENT -->/p' "$toc_path" || {
-                # Fallback if sed fails - write minimal header
+              if sed -n '1,/<!-- BEGIN AUTO-GENERATED CONTENT -->/p' "$toc_path" 2>/dev/null | grep -q .; then
+                sed -n '1,/<!-- BEGIN AUTO-GENERATED CONTENT -->/p' "$toc_path"
+              else
+                # Fallback if sed fails or produces no output - write minimal header
                 echo "# $folder_name"
                 echo ""
                 echo "**Description:**"
@@ -202,8 +168,9 @@ jobs:
                 echo ""
                 echo "<!-- Auto-generated content below. Do not edit between markers. -->"
                 echo "<!-- BEGIN AUTO-GENERATED CONTENT -->"
-              }
+              fi
               
+              echo "DEBUG: Finding subfolders" >&2
               # Find subfolders
               local subfolders=()
               while IFS= read -r -d '' subfolder; do
@@ -214,8 +181,10 @@ jobs:
                 subfolders+=("$rel_subfolder")
               done < <(find "$folder" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
               
+              echo "DEBUG: Found ${#subfolders[@]} subfolders" >&2
               # Generate subfolders table
               if [[ ${#subfolders[@]} -gt 0 ]]; then
+                echo "DEBUG: Generating subfolders table" >&2
                 echo "### 📁 Subfolders"
                 echo ""
                 echo "| Folder | Description | Files | Folders |"
@@ -235,10 +204,11 @@ jobs:
                     fi
                   done < <(find "$subfolder" -maxdepth 1 -type f -print0 2>/dev/null)
                   
-                  # Count immediate subdirectories (excluding hidden)
+                  # Count subfolders (excluding hidden and excluded)
                   local folder_count=0
-                  while IFS= read -r -d '' subdir; do
-                    if ! should_exclude_folder "$subdir"; then
+                  while IFS= read -r -d '' child_folder; do
+                    local child_rel="${child_folder#./}"
+                    if ! should_exclude_folder "$child_rel"; then
                       ((folder_count++))
                     fi
                   done < <(find "$subfolder" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
@@ -255,6 +225,7 @@ jobs:
                 echo ""
               fi
               
+              echo "DEBUG: Finding and grouping files" >&2
               # Find files and group by extension
               declare -A files_by_ext
               while IFS= read -r -d '' file; do
@@ -279,8 +250,10 @@ jobs:
                 fi
               done < <(find "$folder" -maxdepth 1 -type f -print0 | sort -z)
               
+              echo "DEBUG: Found ${#files_by_ext[@]} file groups" >&2
               # Generate file tables by extension
               for ext in $(echo "${!files_by_ext[@]}" | tr ' ' '\n' | sort); do
+                echo "DEBUG: Processing extension group: $ext" >&2
                 local ext_name=$(get_extension_name "$ext")
                 local emoji=$(get_file_emoji "$ext")
                 
@@ -309,18 +282,23 @@ jobs:
                 echo ""
               done
               
+              echo "DEBUG: Extracting footer" >&2
               # Extract manual content after marker (footer)
-              sed -n '/<!-- END AUTO-GENERATED CONTENT -->/,$p' "$toc_path" || {
-                # Fallback if sed fails - write closing marker
+              if sed -n '/<!-- END AUTO-GENERATED CONTENT -->/,$p' "$toc_path" 2>/dev/null | grep -q .; then
+                sed -n '/<!-- END AUTO-GENERATED CONTENT -->/,$p' "$toc_path"
+              else
+                # Fallback if sed fails or produces no output - write closing marker
                 echo "<!-- END AUTO-GENERATED CONTENT -->"
-              }
+              fi
             } > "$toc_path.tmp"
             
+            echo "DEBUG: TOC generation complete, checking temp file" >&2
             # Verify temp file was created and has content before moving
             if [[ -s "$toc_path.tmp" ]]; then
+              echo "DEBUG: Moving temp file to $toc_path" >&2
               mv "$toc_path.tmp" "$toc_path"
             else
-              echo "Error: Failed to generate content for $toc_path"
+              echo "Error: Failed to generate content for $toc_path" >&2
               rm -f "$toc_path.tmp"
               return 1
             fi
@@ -330,16 +308,18 @@ jobs:
           echo "Finding all folders..."
           
           # Process root folder first
+          echo "Processing root folder..."
           process_folder "."
           
           # Process all subfolders
           while IFS= read -r -d '' folder; do
-            local rel_folder="${folder#./}"
+            rel_folder="${folder#./}"
             if should_exclude_folder "$rel_folder"; then
               echo "Skipping excluded folder: $rel_folder"
               continue
             fi
             
+            echo "Processing subfolder: $rel_folder"
             process_folder "$folder"
           done < <(find . -mindepth 1 -type d -print0 | sort -z)
           
