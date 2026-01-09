@@ -165,17 +165,17 @@ jobs:
             # Create TOC file if it doesn't exist
             if [[ ! -f "$toc_path" ]]; then
               echo "Creating new TOC file at $toc_path"
-              cat > "$toc_path" <<EOF
-# $folder_name
-
-**Description:**
-
----
-
-<!-- Auto-generated content below. Do not edit between markers. -->
-<!-- BEGIN AUTO-GENERATED CONTENT -->
-<!-- END AUTO-GENERATED CONTENT -->
-EOF
+              {
+                echo "# $folder_name"
+                echo ""
+                echo "**Description:**"
+                echo ""
+                echo "---"
+                echo ""
+                echo "<!-- Auto-generated content below. Do not edit between markers. -->"
+                echo "<!-- BEGIN AUTO-GENERATED CONTENT -->"
+                echo "<!-- END AUTO-GENERATED CONTENT -->"
+              } > "$toc_path"
             fi
             
             # Check if markers exist, if not add them
