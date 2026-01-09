@@ -224,39 +224,39 @@ jobs:
                 echo "| Folder | Description | Files | Folders |"
                 echo "|--------|-------------|-------|--------|"
                 
-            for subfolder in "${subfolders[@]}"; do
-              subfolder_name=$(basename "$subfolder")
-              subfolder_toc="$subfolder/${subfolder_name}-TOC.md"
-              description=$(extract_description "$subfolder_toc")
-              
-              # Count files (excluding TOC and hidden files)
-              file_count=0
-              while IFS= read -r -d '' file; do
-                filename=$(basename "$file")
-                if [[ "$filename" != "${subfolder_name}-TOC.md" ]] && ! should_exclude_file "$file"; then
-                  ((file_count++))
-                fi
-              done < <(find "$subfolder" -maxdepth 1 -type f -print0 2>/dev/null)
-              
-              # Count immediate subdirectories (excluding hidden)
-              folder_count=0
-              while IFS= read -r -d '' subdir; do
-                if ! should_exclude_folder "$subdir"; then
-                  ((folder_count++))
-                fi
-              done < <(find "$subfolder" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
-              
-              # Relative path for link
-              relative_path="${subfolder#$folder/}"
-              if [[ "$folder" == "." ]]; then
-                relative_path="$subfolder"
+                for subfolder in "${subfolders[@]}"; do
+                  subfolder_name=$(basename "$subfolder")
+                  subfolder_toc="$subfolder/${subfolder_name}-TOC.md"
+                  description=$(extract_description "$subfolder_toc")
+                  
+                  # Count files (excluding TOC and hidden files)
+                  file_count=0
+                  while IFS= read -r -d '' file; do
+                    filename=$(basename "$file")
+                    if [[ "$filename" != "${subfolder_name}-TOC.md" ]] && ! should_exclude_file "$file"; then
+                      ((file_count++))
+                    fi
+                  done < <(find "$subfolder" -maxdepth 1 -type f -print0 2>/dev/null)
+                  
+                  # Count immediate subdirectories (excluding hidden)
+                  folder_count=0
+                  while IFS= read -r -d '' subdir; do
+                    if ! should_exclude_folder "$subdir"; then
+                      ((folder_count++))
+                    fi
+                  done < <(find "$subfolder" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+                  
+                  # Relative path for link
+                  relative_path="${subfolder#$folder/}"
+                  if [[ "$folder" == "." ]]; then
+                    relative_path="$subfolder"
+                  fi
+                  
+                  echo "| [$subfolder_name]($relative_path/${subfolder_name}-TOC.md) | $description | $file_count | $folder_count |"
+                done
+                
+                echo ""
               fi
-              
-              echo "| [$subfolder_name]($relative_path/${subfolder_name}-TOC.md) | $description | $file_count | $folder_count |"
-            done
-              
-              echo ""
-            fi
               
               echo "DEBUG: Finding and grouping files" >&2
               # Find files and group by extension
