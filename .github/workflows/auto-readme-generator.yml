@@ -1,0 +1,336 @@
+name: Auto README Generator
+
+# Triggers on any push to any branch, and allows manual execution
+on:
+  push:
+    branches: ['**']
+  workflow_dispatch:
+
+# Required permission to commit changes back to the repository
+permissions:
+  contents: write
+
+# Configuration variables - modify these to customize behavior
+env:
+  EXCLUDED_FOLDERS: '.git,.github,node_modules'
+  EXCLUDED_PATTERNS: '.gitignore,.DS_Store'
+
+jobs:
+  update-readmes:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: Generate README files
+        run: |
+          #!/bin/bash
+          set -e
+          
+          # Configuration
+          REPO_OWNER="${{ github.repository_owner }}"
+          REPO_NAME="${{ github.event.repository.name }}"
+          BRANCH="${{ github.ref_name }}"
+          EXCLUDED_FOLDERS="${{ env.EXCLUDED_FOLDERS }}"
+          EXCLUDED_PATTERNS="${{ env.EXCLUDED_PATTERNS }}"
+          
+          # Convert comma-separated lists to arrays
+          IFS=',' read -ra EXCLUDE_DIRS <<< "$EXCLUDED_FOLDERS"
+          IFS=',' read -ra EXCLUDE_FILES <<< "$EXCLUDED_PATTERNS"
+          
+          # Function to check if folder should be excluded
+          should_exclude_folder() {
+            local folder="$1"
+            local base_folder=$(basename "$folder")
+            
+            for exclude in "${EXCLUDE_DIRS[@]}"; do
+              if [[ "$base_folder" == "$exclude" || "$folder" == *"/$exclude" || "$folder" == "$exclude" ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+          
+          # Function to check if file should be excluded
+          should_exclude_file() {
+            local file="$1"
+            local filename=$(basename "$file")
+            
+            # Exclude hidden files (dotfiles)
+            if [[ "$filename" == .* ]]; then
+              return 0
+            fi
+            
+            for exclude in "${EXCLUDE_FILES[@]}"; do
+              if [[ "$filename" == "$exclude" ]]; then
+                return 0
+              fi
+            done
+            return 1
+          }
+          
+          # Function to format file size
+          format_size() {
+            local size=$1
+            if (( size < 1024 )); then
+              echo "${size}B"
+            elif (( size < 1048576 )); then
+              echo "$(awk "BEGIN {printf \"%.1f\", $size/1024}")KB"
+            else
+              echo "$(awk "BEGIN {printf \"%.1f\", $size/1048576}")MB"
+            fi
+          }
+          
+          # Function to extract description from README
+          extract_description() {
+            local readme_file="$1"
+            
+            if [[ ! -f "$readme_file" ]]; then
+              echo ""
+              return
+            fi
+            
+            # Extract text between **Description:** and --- or markers
+            local in_desc=false
+            local description=""
+            
+            while IFS= read -r line; do
+              if [[ "$line" =~ ^\*\*Description:\*\* ]]; then
+                in_desc=true
+                continue
+              fi
+              
+              if [[ "$in_desc" == true ]]; then
+                if [[ "$line" =~ ^--- || "$line" =~ ^\<\!-- ]]; then
+                  break
+                fi
+                if [[ -n "$line" ]]; then
+                  description="$line"
+                  break
+                fi
+              fi
+            done < "$readme_file"
+            
+            echo "$description"
+          }
+          
+          # Function to get file extension display name
+          get_extension_name() {
+            local ext="$1"
+            case "$ext" in
+              svg) echo "SVG Files" ;;
+              md) echo "Markdown Files" ;;
+              png) echo "PNG Files" ;;
+              jpg|jpeg) echo "JPEG Files" ;;
+              gif) echo "GIF Files" ;;
+              json) echo "JSON Files" ;;
+              yml|yaml) echo "YAML Files" ;;
+              txt) echo "Text Files" ;;
+              pdf) echo "PDF Files" ;;
+              *) echo "$(echo $ext | tr '[:lower:]' '[:upper:]') Files" ;;
+            esac
+          }
+          
+          # Function to get emoji for file type
+          get_file_emoji() {
+            local ext="$1"
+            case "$ext" in
+              svg|png|jpg|jpeg|gif) echo "🎨" ;;
+              md) echo "📄" ;;
+              json|yml|yaml) echo "⚙️" ;;
+              txt) echo "📝" ;;
+              pdf) echo "📕" ;;
+              *) echo "📎" ;;
+            esac
+          }
+          
+          # Function to process a single folder
+          process_folder() {
+            local folder="$1"
+            
+            # Get folder name for title
+            if [[ "$folder" == "." ]]; then
+              folder_name="$(basename "$(pwd)")"
+            else
+              folder_name="$(basename "$folder")"
+            fi
+            
+            local toc_path="$folder/${folder_name}-TOC.md"
+            
+            echo "Processing folder: $folder"
+            
+            # Create TOC file if it doesn't exist
+            if [[ ! -f "$toc_path" ]]; then
+              echo "Creating new TOC file at $toc_path"
+              cat > "$toc_path" << 'EOF'
+# $folder_name
+
+**Description:**
+
+---
+
+<!-- Auto-generated content below. Do not edit between markers. -->
+<!-- BEGIN AUTO-GENERATED CONTENT -->
+<!-- END AUTO-GENERATED CONTENT -->
+EOF
+            fi
+            
+            # Check if markers exist, if not add them
+            if ! grep -q "<!-- BEGIN AUTO-GENERATED CONTENT -->" "$toc_path"; then
+              echo "Adding markers to $toc_path"
+              echo "" >> "$toc_path"
+              echo "---" >> "$toc_path"
+              echo "" >> "$toc_path"
+              echo "<!-- Auto-generated content below. Do not edit between markers. -->" >> "$toc_path"
+              echo "<!-- BEGIN AUTO-GENERATED CONTENT -->" >> "$toc_path"
+              echo "<!-- END AUTO-GENERATED CONTENT -->" >> "$toc_path"
+            fi
+            
+            # Extract manual content before marker
+            sed -n '1,/<!-- BEGIN AUTO-GENERATED CONTENT -->/p' "$toc_path" > "$toc_path.tmp"
+            
+            # Generate auto-content
+            local auto_content=""
+            
+            # Find subfolders
+            local subfolders=()
+            while IFS= read -r -d '' subfolder; do
+              local rel_subfolder="${subfolder#./}"
+              if should_exclude_folder "$rel_subfolder"; then
+                continue
+              fi
+              subfolders+=("$rel_subfolder")
+            done < <(find "$folder" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+            
+            # Generate subfolders table
+            if [[ ${#subfolders[@]} -gt 0 ]]; then
+              auto_content+="\n### 📁 Subfolders\n\n"
+              auto_content+="| Folder | Description | Files | Folders |\n"
+              auto_content+="|--------|-------------|-------|--------|\n"
+              
+              for subfolder in "${subfolders[@]}"; do
+                local subfolder_name=$(basename "$subfolder")
+                local subfolder_toc="$subfolder/${subfolder_name}-TOC.md"
+                local description=$(extract_description "$subfolder_toc")
+                
+                # Count files (excluding TOC and hidden files)
+                local file_count=0
+                while IFS= read -r -d '' file; do
+                  local filename=$(basename "$file")
+                  if [[ "$filename" != "${subfolder_name}-TOC.md" ]] && ! should_exclude_file "$file"; then
+                    ((file_count++))
+                  fi
+                done < <(find "$subfolder" -maxdepth 1 -type f -print0 2>/dev/null)
+                
+                # Count immediate subdirectories (excluding hidden)
+                local folder_count=0
+                while IFS= read -r -d '' subdir; do
+                  if ! should_exclude_folder "$subdir"; then
+                    ((folder_count++))
+                  fi
+                done < <(find "$subfolder" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+                
+                # Relative path for link
+                local relative_path="${subfolder#$folder/}"
+                if [[ "$folder" == "." ]]; then
+                  relative_path="$subfolder"
+                fi
+                
+                auto_content+="| [$subfolder_name]($relative_path/${subfolder_name}-TOC.md) | $description | $file_count | $folder_count |\n"
+              done
+              
+              auto_content+="\n"
+            fi
+            
+            # Find files and group by extension
+            declare -A files_by_ext
+            while IFS= read -r -d '' file; do
+              local filename=$(basename "$file")
+              
+              # Skip TOC file and excluded files
+              if [[ "$file" == "$toc_path" ]] || should_exclude_file "$file"; then
+                continue
+              fi
+              
+              # Get extension
+              local ext="${filename##*.}"
+              if [[ "$filename" == "$ext" ]]; then
+                ext="no-extension"
+              fi
+              
+              # Add to group
+              if [[ -z "${files_by_ext[$ext]}" ]]; then
+                files_by_ext[$ext]="$file"
+              else
+                files_by_ext[$ext]+=$'\n'"$file"
+              fi
+            done < <(find "$folder" -maxdepth 1 -type f -print0 | sort -z)
+            
+            # Generate file tables by extension
+            for ext in $(echo "${!files_by_ext[@]}" | tr ' ' '\n' | sort); do
+              local ext_name=$(get_extension_name "$ext")
+              local emoji=$(get_file_emoji "$ext")
+              
+              auto_content+="\n### $emoji $ext_name\n\n"
+              auto_content+="| Filename | Type | Size | View | Raw |\n"
+              auto_content+="|----------|------|------|------|-----|\n"
+              
+              # Sort files in this group
+              while IFS= read -r file; do
+                [[ -z "$file" ]] && continue
+                
+                local filename=$(basename "$file")
+                local size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+                local formatted_size=$(format_size $size)
+                
+                # Generate URLs
+                local relative_path="${file#./}"
+                local encoded_path=$(echo "$relative_path" | sed 's/ /%20/g')
+                local view_url="https://github.com/$REPO_OWNER/$REPO_NAME/blob/$BRANCH/$encoded_path"
+                local raw_url="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$BRANCH/$encoded_path"
+                
+                auto_content+="| \`$filename\` | .$ext | $formatted_size | [View]($view_url) | [Raw]($raw_url) |\n"
+              done <<< "$(echo "${files_by_ext[$ext]}" | sort)"
+              
+              auto_content+="\n"
+            done
+            
+            # Write auto-generated content
+            echo -e "$auto_content" >> "$toc_path.tmp"
+            
+            # Extract manual content after marker
+            sed -n '/<!-- END AUTO-GENERATED CONTENT -->/,$p' "$toc_path" >> "$toc_path.tmp"
+            
+            # Replace original
+            mv "$toc_path.tmp" "$toc_path"
+          }
+          
+          # Find all folders recursively and process them
+          echo "Finding all folders..."
+          
+          # Process root folder first
+          process_folder "."
+          
+          # Process all subfolders
+          while IFS= read -r -d '' folder; do
+            local rel_folder="${folder#./}"
+            if should_exclude_folder "$rel_folder"; then
+              echo "Skipping excluded folder: $rel_folder"
+              continue
+            fi
+            
+            process_folder "$folder"
+          done < <(find . -mindepth 1 -type d -print0 | sort -z)
+          
+          echo "README generation complete!"
+      
+      - name: Commit changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'docs: auto-update TOC files [skip ci]'
+          file_pattern: '**/*-TOC.md'
+          commit_user_name: 'github-actions[bot]'
+          commit_user_email: 'github-actions[bot]@users.noreply.github.com'

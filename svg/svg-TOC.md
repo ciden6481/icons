@@ -1,8 +1,8 @@
-# SVG Icons
+# svg
 
 **Description:**
 
-Collection of SVG icons for Power BI reports
+
 
 ---
 
