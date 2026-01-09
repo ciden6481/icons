@@ -1,23 +1,16 @@
 name: Auto README Generator
 
-# Triggers on any push to any branch, and allows manual execution
 on:
   push:
-    branches: ['**']
-  workflow_dispatch:
+    branches:
+      - '*'
 
-# Required permission to commit changes back to the repository
 permissions:
   contents: write
 
-# Configuration variables - modify these to customize behavior
-env:
-  EXCLUDED_FOLDERS: '.git,.github,node_modules'
-  EXCLUDED_PATTERNS: '.gitignore,.DS_Store'
-
 jobs:
   update-readmes:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
       - name: Checkout repository
@@ -26,21 +19,24 @@ jobs:
           fetch-depth: 0
       
       - name: Generate README files
+        env:
+          EXCLUDED_FOLDERS: .git,.github,node_modules
+          EXCLUDED_PATTERNS: .gitignore,.DS_Store
         run: |
           #!/bin/bash
           set -e
-          
+
           # Configuration
-          REPO_OWNER="${{ github.repository_owner }}"
-          REPO_NAME="${{ github.event.repository.name }}"
-          BRANCH="${{ github.ref_name }}"
-          EXCLUDED_FOLDERS="${{ env.EXCLUDED_FOLDERS }}"
-          EXCLUDED_PATTERNS="${{ env.EXCLUDED_PATTERNS }}"
-          
+          REPO_OWNER="ciden6481"
+          REPO_NAME="icons"
+          BRANCH="main"
+          EXCLUDED_FOLDERS=".git,.github,node_modules"
+          EXCLUDED_PATTERNS=".gitignore,.DS_Store"
+
           # Convert comma-separated lists to arrays
           IFS=',' read -ra EXCLUDE_DIRS <<< "$EXCLUDED_FOLDERS"
           IFS=',' read -ra EXCLUDE_FILES <<< "$EXCLUDED_PATTERNS"
-          
+
           # Function to check if folder should be excluded
           should_exclude_folder() {
             local folder="$1"
@@ -53,7 +49,7 @@ jobs:
             done
             return 1
           }
-          
+
           # Function to check if file should be excluded
           should_exclude_file() {
             local file="$1"
@@ -71,7 +67,7 @@ jobs:
             done
             return 1
           }
-          
+
           # Function to format file size
           format_size() {
             local size=$1
@@ -83,7 +79,7 @@ jobs:
               echo "$(awk "BEGIN {printf \"%.1f\", $size/1048576}")MB"
             fi
           }
-          
+
           # Function to extract description from README
           extract_description() {
             local readme_file="$1"
@@ -116,7 +112,7 @@ jobs:
             
             echo "$description"
           }
-          
+
           # Function to get file extension display name
           get_extension_name() {
             local ext="$1"
@@ -133,7 +129,7 @@ jobs:
               *) echo "$(echo $ext | tr '[:lower:]' '[:upper:]') Files" ;;
             esac
           }
-          
+
           # Function to get emoji for file type
           get_file_emoji() {
             local ext="$1"
@@ -146,7 +142,7 @@ jobs:
               *) echo "📎" ;;
             esac
           }
-          
+
           # Function to process a single folder
           process_folder() {
             local folder="$1"
@@ -222,12 +218,12 @@ jobs:
               echo "DEBUG: Found ${#subfolders[@]} subfolders" >&2
               # Generate subfolders table
               if [[ ${#subfolders[@]} -gt 0 ]]; then
-              echo "DEBUG: Generating subfolders table" >&2
-              echo "### 📁 Subfolders"
-              echo ""
-              echo "| Folder | Description | Files | Folders |"
-              echo "|--------|-------------|-------|--------|"
-              
+                echo "DEBUG: Generating subfolders table" >&2
+                echo "### 📁 Subfolders"
+                echo ""
+                echo "| Folder | Description | Files | Folders |"
+                echo "|--------|-------------|-------|--------|"
+                
             for subfolder in "${subfolders[@]}"; do
               subfolder_name=$(basename "$subfolder")
               subfolder_toc="$subfolder/${subfolder_name}-TOC.md"
@@ -340,14 +336,14 @@ jobs:
               return 1
             fi
           }
-          
+
           # Find all folders recursively and process them
           echo "Finding all folders..."
-          
+
           # Process root folder first
           echo "Processing root folder..."
           process_folder "."
-          
+
           # Process all subfolders
           while IFS= read -r -d '' folder; do
             rel_folder="${folder#./}"
@@ -359,13 +355,11 @@ jobs:
             echo "Processing subfolder: $rel_folder"
             process_folder "$folder"
           done < <(find . -mindepth 1 -type d -print0 | sort -z)
-          
+
           echo "README generation complete!"
-      
+
       - name: Commit changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'docs: auto-update TOC files [skip ci]'
+          commit_message: 'docs: auto-update README files'
           file_pattern: '**/*-TOC.md'
-          commit_user_name: 'github-actions[bot]'
-          commit_user_email: 'github-actions[bot]@users.noreply.github.com'
