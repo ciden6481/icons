@@ -191,10 +191,18 @@ jobs:
             
             # Extract manual content before marker and generate new file
             {
-              sed -n '1,/<!-- BEGIN AUTO-GENERATED CONTENT -->/p' "$toc_path"
-              
-              # Generate auto-content
-              local auto_content=""
+              # Extract header content (everything up to and including the BEGIN marker)
+              sed -n '1,/<!-- BEGIN AUTO-GENERATED CONTENT -->/p' "$toc_path" || {
+                # Fallback if sed fails - write minimal header
+                echo "# $folder_name"
+                echo ""
+                echo "**Description:**"
+                echo ""
+                echo "---"
+                echo ""
+                echo "<!-- Auto-generated content below. Do not edit between markers. -->"
+                echo "<!-- BEGIN AUTO-GENERATED CONTENT -->"
+              }
               
               # Find subfolders
               local subfolders=()
@@ -301,8 +309,11 @@ jobs:
                 echo ""
               done
               
-              # Extract manual content after marker
-              sed -n '/<!-- END AUTO-GENERATED CONTENT -->/,$p' "$toc_path"
+              # Extract manual content after marker (footer)
+              sed -n '/<!-- END AUTO-GENERATED CONTENT -->/,$p' "$toc_path" || {
+                # Fallback if sed fails - write closing marker
+                echo "<!-- END AUTO-GENERATED CONTENT -->"
+              }
             } > "$toc_path.tmp"
             
             # Verify temp file was created and has content before moving
