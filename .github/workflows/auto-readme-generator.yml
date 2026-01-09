@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  # Note: Do NOT add 'workflows: write' - this is a security risk
+  # The workflow is configured to exclude .github folders entirely
 
 jobs:
   update-readmes:
@@ -20,8 +22,8 @@ jobs:
       
       - name: Generate README files
         env:
-          EXCLUDED_FOLDERS: .git,.github,node_modules
-          EXCLUDED_PATTERNS: .gitignore,.DS_Store
+          EXCLUDED_FOLDERS: .git,.github,node_modules,.vscode,.idea,dist,build,out,target,.next,.nuxt,coverage,.cache,vendor,temp,tmp
+          EXCLUDED_PATTERNS: .gitignore,.DS_Store,.env,.env.*,*.log,*.tmp,thumbs.db,desktop.ini,package-lock.json,yarn.lock,pnpm-lock.yaml
         run: |
           #!/bin/bash
           set -e
@@ -30,8 +32,8 @@ jobs:
           REPO_OWNER="ciden6481"
           REPO_NAME="icons"
           BRANCH="main"
-          EXCLUDED_FOLDERS=".git,.github,node_modules"
-          EXCLUDED_PATTERNS=".gitignore,.DS_Store"
+          EXCLUDED_FOLDERS=".git,.github,node_modules,.vscode,.idea,dist,build,out,target,.next,.nuxt,coverage,.cache,vendor,temp,tmp"
+          EXCLUDED_PATTERNS=".gitignore,.DS_Store,.env,.env.*,*.log,*.tmp,thumbs.db,desktop.ini,package-lock.json,yarn.lock,pnpm-lock.yaml"
 
           # Convert comma-separated lists to arrays
           IFS=',' read -ra EXCLUDE_DIRS <<< "$EXCLUDED_FOLDERS"
@@ -42,8 +44,9 @@ jobs:
             local folder="$1"
             local base_folder=$(basename "$folder")
             
+            # Check if any part of the path matches exclusions
             for exclude in "${EXCLUDE_DIRS[@]}"; do
-              if [[ "$base_folder" == "$exclude" || "$folder" == *"/$exclude" || "$folder" == "$exclude" ]]; then
+              if [[ "$base_folder" == "$exclude" || "$folder" == *"/$exclude"/* || "$folder" == "$exclude"/* || "$folder" == *"/$exclude" || "$folder" == "$exclude" ]]; then
                 return 0
               fi
             done
@@ -61,7 +64,14 @@ jobs:
             fi
             
             for exclude in "${EXCLUDE_FILES[@]}"; do
-              if [[ "$filename" == "$exclude" ]]; then
+              # Handle wildcard patterns
+              if [[ "$exclude" == *"*"* ]]; then
+                # Convert pattern to regex
+                pattern="${exclude//\*/.*}"
+                if [[ "$filename" =~ ^${pattern}$ ]]; then
+                  return 0
+                fi
+              elif [[ "$filename" == "$exclude" ]]; then
                 return 0
               fi
             done
@@ -344,7 +354,7 @@ jobs:
           echo "Processing root folder..."
           process_folder "."
 
-          # Process all subfolders
+          # Process all subfolders with enhanced exclusion checking
           while IFS= read -r -d '' folder; do
             rel_folder="${folder#./}"
             if should_exclude_folder "$rel_folder"; then
