@@ -189,123 +189,130 @@ jobs:
               echo "<!-- END AUTO-GENERATED CONTENT -->" >> "$toc_path"
             fi
             
-            # Extract manual content before marker
-            sed -n '1,/<!-- BEGIN AUTO-GENERATED CONTENT -->/p' "$toc_path" > "$toc_path.tmp"
-            
-            # Generate auto-content
-            local auto_content=""
-            
-            # Find subfolders
-            local subfolders=()
-            while IFS= read -r -d '' subfolder; do
-              local rel_subfolder="${subfolder#./}"
-              if should_exclude_folder "$rel_subfolder"; then
-                continue
-              fi
-              subfolders+=("$rel_subfolder")
-            done < <(find "$folder" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
-            
-            # Generate subfolders table
-            if [[ ${#subfolders[@]} -gt 0 ]]; then
-              auto_content+="\n### 📁 Subfolders\n\n"
-              auto_content+="| Folder | Description | Files | Folders |\n"
-              auto_content+="|--------|-------------|-------|--------|\n"
+            # Extract manual content before marker and generate new file
+            {
+              sed -n '1,/<!-- BEGIN AUTO-GENERATED CONTENT -->/p' "$toc_path"
               
-              for subfolder in "${subfolders[@]}"; do
-                local subfolder_name=$(basename "$subfolder")
-                local subfolder_toc="$subfolder/${subfolder_name}-TOC.md"
-                local description=$(extract_description "$subfolder_toc")
+              # Generate auto-content
+              local auto_content=""
+              
+              # Find subfolders
+              local subfolders=()
+              while IFS= read -r -d '' subfolder; do
+                local rel_subfolder="${subfolder#./}"
+                if should_exclude_folder "$rel_subfolder"; then
+                  continue
+                fi
+                subfolders+=("$rel_subfolder")
+              done < <(find "$folder" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z)
+              
+              # Generate subfolders table
+              if [[ ${#subfolders[@]} -gt 0 ]]; then
+                echo "### 📁 Subfolders"
+                echo ""
+                echo "| Folder | Description | Files | Folders |"
+                echo "|--------|-------------|-------|--------|"
                 
-                # Count files (excluding TOC and hidden files)
-                local file_count=0
-                while IFS= read -r -d '' file; do
-                  local filename=$(basename "$file")
-                  if [[ "$filename" != "${subfolder_name}-TOC.md" ]] && ! should_exclude_file "$file"; then
-                    ((file_count++))
+                for subfolder in "${subfolders[@]}"; do
+                  local subfolder_name=$(basename "$subfolder")
+                  local subfolder_toc="$subfolder/${subfolder_name}-TOC.md"
+                  local description=$(extract_description "$subfolder_toc")
+                  
+                  # Count files (excluding TOC and hidden files)
+                  local file_count=0
+                  while IFS= read -r -d '' file; do
+                    local filename=$(basename "$file")
+                    if [[ "$filename" != "${subfolder_name}-TOC.md" ]] && ! should_exclude_file "$file"; then
+                      ((file_count++))
+                    fi
+                  done < <(find "$subfolder" -maxdepth 1 -type f -print0 2>/dev/null)
+                  
+                  # Count immediate subdirectories (excluding hidden)
+                  local folder_count=0
+                  while IFS= read -r -d '' subdir; do
+                    if ! should_exclude_folder "$subdir"; then
+                      ((folder_count++))
+                    fi
+                  done < <(find "$subfolder" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+                  
+                  # Relative path for link
+                  local relative_path="${subfolder#$folder/}"
+                  if [[ "$folder" == "." ]]; then
+                    relative_path="$subfolder"
                   fi
-                done < <(find "$subfolder" -maxdepth 1 -type f -print0 2>/dev/null)
+                  
+                  echo "| [$subfolder_name]($relative_path/${subfolder_name}-TOC.md) | $description | $file_count | $folder_count |"
+                done
                 
-                # Count immediate subdirectories (excluding hidden)
-                local folder_count=0
-                while IFS= read -r -d '' subdir; do
-                  if ! should_exclude_folder "$subdir"; then
-                    ((folder_count++))
-                  fi
-                done < <(find "$subfolder" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
+                echo ""
+              fi
+              
+              # Find files and group by extension
+              declare -A files_by_ext
+              while IFS= read -r -d '' file; do
+                local filename=$(basename "$file")
                 
-                # Relative path for link
-                local relative_path="${subfolder#$folder/}"
-                if [[ "$folder" == "." ]]; then
-                  relative_path="$subfolder"
+                # Skip TOC file and excluded files
+                if [[ "$file" == "$toc_path" ]] || should_exclude_file "$file"; then
+                  continue
                 fi
                 
-                auto_content+="| [$subfolder_name]($relative_path/${subfolder_name}-TOC.md) | $description | $file_count | $folder_count |\n"
+                # Get extension
+                local ext="${filename##*.}"
+                if [[ "$filename" == "$ext" ]]; then
+                  ext="no-extension"
+                fi
+                
+                # Add to group
+                if [[ -z "${files_by_ext[$ext]}" ]]; then
+                  files_by_ext[$ext]="$file"
+                else
+                  files_by_ext[$ext]+=$'\n'"$file"
+                fi
+              done < <(find "$folder" -maxdepth 1 -type f -print0 | sort -z)
+              
+              # Generate file tables by extension
+              for ext in $(echo "${!files_by_ext[@]}" | tr ' ' '\n' | sort); do
+                local ext_name=$(get_extension_name "$ext")
+                local emoji=$(get_file_emoji "$ext")
+                
+                echo "### $emoji $ext_name"
+                echo ""
+                echo "| Filename | Type | Size | View | Raw |"
+                echo "|----------|------|------|------|-----|"
+                
+                # Sort files in this group
+                while IFS= read -r file; do
+                  [[ -z "$file" ]] && continue
+                  
+                  local filename=$(basename "$file")
+                  local size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
+                  local formatted_size=$(format_size $size)
+                  
+                  # Generate URLs
+                  local relative_path="${file#./}"
+                  local encoded_path=$(echo "$relative_path" | sed 's/ /%20/g')
+                  local view_url="https://github.com/$REPO_OWNER/$REPO_NAME/blob/$BRANCH/$encoded_path"
+                  local raw_url="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$BRANCH/$encoded_path"
+                  
+                  echo "| \`$filename\` | .$ext | $formatted_size | [View]($view_url) | [Raw]($raw_url) |"
+                done <<< "$(echo "${files_by_ext[$ext]}" | sort)"
+                
+                echo ""
               done
               
-              auto_content+="\n"
+              # Extract manual content after marker
+              sed -n '/<!-- END AUTO-GENERATED CONTENT -->/,$p' "$toc_path"
+            } > "$toc_path.tmp"
+            
+            # Verify temp file was created and has content before moving
+            if [[ -s "$toc_path.tmp" ]]; then
+              mv "$toc_path.tmp" "$toc_path"
+            else
+              echo "Error: Failed to generate content for $toc_path"
+              rm -f "$toc_path.tmp"
+              return 1
             fi
-            
-            # Find files and group by extension
-            declare -A files_by_ext
-            while IFS= read -r -d '' file; do
-              local filename=$(basename "$file")
-              
-              # Skip TOC file and excluded files
-              if [[ "$file" == "$toc_path" ]] || should_exclude_file "$file"; then
-                continue
-              fi
-              
-              # Get extension
-              local ext="${filename##*.}"
-              if [[ "$filename" == "$ext" ]]; then
-                ext="no-extension"
-              fi
-              
-              # Add to group
-              if [[ -z "${files_by_ext[$ext]}" ]]; then
-                files_by_ext[$ext]="$file"
-              else
-                files_by_ext[$ext]+=$'\n'"$file"
-              fi
-            done < <(find "$folder" -maxdepth 1 -type f -print0 | sort -z)
-            
-            # Generate file tables by extension
-            for ext in $(echo "${!files_by_ext[@]}" | tr ' ' '\n' | sort); do
-              local ext_name=$(get_extension_name "$ext")
-              local emoji=$(get_file_emoji "$ext")
-              
-              auto_content+="\n### $emoji $ext_name\n\n"
-              auto_content+="| Filename | Type | Size | View | Raw |\n"
-              auto_content+="|----------|------|------|------|-----|\n"
-              
-              # Sort files in this group
-              while IFS= read -r file; do
-                [[ -z "$file" ]] && continue
-                
-                local filename=$(basename "$file")
-                local size=$(stat -c%s "$file" 2>/dev/null || stat -f%z "$file" 2>/dev/null)
-                local formatted_size=$(format_size $size)
-                
-                # Generate URLs
-                local relative_path="${file#./}"
-                local encoded_path=$(echo "$relative_path" | sed 's/ /%20/g')
-                local view_url="https://github.com/$REPO_OWNER/$REPO_NAME/blob/$BRANCH/$encoded_path"
-                local raw_url="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/$BRANCH/$encoded_path"
-                
-                auto_content+="| \`$filename\` | .$ext | $formatted_size | [View]($view_url) | [Raw]($raw_url) |\n"
-              done <<< "$(echo "${files_by_ext[$ext]}" | sort)"
-              
-              auto_content+="\n"
-            done
-            
-            # Write auto-generated content
-            echo -e "$auto_content" >> "$toc_path.tmp"
-            
-            # Extract manual content after marker
-            sed -n '/<!-- END AUTO-GENERATED CONTENT -->/,$p' "$toc_path" >> "$toc_path.tmp"
-            
-            # Replace original
-            mv "$toc_path.tmp" "$toc_path"
           }
           
           # Find all folders recursively and process them
