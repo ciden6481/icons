@@ -1,5 +1,6 @@
 # Copilot Instructions for Auto README Generator
-
+## Task & Command execution
+- Before performing any git commit operations, pause and allow the user to review and accept changes to avoid conflicts. Prepare the commit operation, ask for final approval, and wait for user confirmation before proceeding.
 ## Overview
 This repository includes an automated README generation system that creates and maintains `{folder name}-TOC.md` files in every folder throughout the repository. Regular `README.md` files are treated as normal documentation and are indexed like any other file.
 
