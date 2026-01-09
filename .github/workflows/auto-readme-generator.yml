@@ -234,7 +234,7 @@ jobs:
                   while IFS= read -r -d '' file; do
                     filename=$(basename "$file")
                     if [[ "$filename" != "${subfolder_name}-TOC.md" ]] && ! should_exclude_file "$file"; then
-                      ((file_count++))
+                      file_count=$((file_count + 1))
                     fi
                   done < <(find "$subfolder" -maxdepth 1 -type f -print0 2>/dev/null)
                   
@@ -242,7 +242,7 @@ jobs:
                   folder_count=0
                   while IFS= read -r -d '' subdir; do
                     if ! should_exclude_folder "$subdir"; then
-                      ((folder_count++))
+                      folder_count=$((folder_count + 1))
                     fi
                   done < <(find "$subfolder" -mindepth 1 -maxdepth 1 -type d -print0 2>/dev/null)
                   
